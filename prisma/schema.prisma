@@ -1,0 +1,491 @@
+// ChemicalPro + PharmaCloud — Complete Database Schema
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// CHEMICAL / PRODUCT TABLE
+// ─────────────────────────────────────────────
+model Chemical {
+  id                  String   @id @default(cuid())
+  slug                String   @unique
+  platform            Platform @default(CHEMICALPRO) // CHEMICALPRO or PHARMACLOUD
+
+  // Core Identity
+  productName         String
+  iupacName           String?
+  casNumber           String?  @unique
+  ecNumber            String?  // European Community number
+  inchiKey            String?
+  smiles              String?
+
+  // Classification
+  molecularFormula    String?
+  molecularWeight     Float?
+  hsCode              String?  // Harmonised System code for export
+  unNumber            String?  // UN transport number
+  hazardClass         String?  // GHS hazard class
+  ghs                 String[] // GHS pictogram codes
+  signalWord          String?  // Danger / Warning
+
+  // Taxonomy
+  category            Category   @relation(fields: [categoryId], references: [id])
+  categoryId          String
+  subcategory         String?
+  tags                String[]
+
+  // Physical Properties
+  appearance          String?
+  colour              String?
+  odour               String?
+  density             String?
+  meltingPoint        String?
+  boilingPoint        String?
+  flashPoint          String?
+  solubility          String?
+  pH                  String?
+  vapourPressure      String?
+  logP                String?
+
+  // Commercial Info
+  purityGrades        String[]  // e.g. ["99%", "99.5%", "Technical", "Reagent"]
+  packagingOptions    String[]  // e.g. ["25kg bag", "200L drum", "IBC"]
+  minOrderQty         String?
+  leadTime            String?
+  shelfLife           String?
+  storageConditions   String?
+
+  // Regulatory
+  reachRegistered     Boolean  @default(false)
+  cifcRegistered      Boolean  @default(false)
+  cibRegistered       Boolean  @default(false)
+  fdaApproved         Boolean  @default(false)
+  kosherCertified     Boolean  @default(false)
+  halalCertified      Boolean  @default(false)
+  isoGrade            String?
+  pharmacopoeiaGrade  String?  // USP, BP, IP, Ph.Eur, JP
+
+  // Content
+  shortDescription    String
+  longDescription     String
+  applications        String[]
+  industries          String[]
+  useCases            String?
+  technicalNotes      String?
+
+  // SEO
+  seoTitle            String
+  seoDescription      String
+  seoKeywords         String[]
+  ogImage             String?
+  canonicalUrl        String?
+
+  // AI-search optimized summaries
+  aiSummary           String?
+  aiApplications      String?
+  aiSourcing          String?
+
+  // Status
+  isActive            Boolean  @default(true)
+  isFeatured          Boolean  @default(false)
+  isExportReady       Boolean  @default(true)
+  viewCount           Int      @default(0)
+
+  // Timestamps
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  documents           Document[]
+  suppliers           SupplierProduct[]
+  rfqs                RFQ[]
+  synonyms            Synonym[]
+  countryPages        CountryPage[]
+  industryPages       IndustryPage[]
+  relatedChemicals    ChemicalRelation[] @relation("ChemFrom")
+  relatedTo           ChemicalRelation[] @relation("ChemTo")
+
+  @@index([casNumber])
+  @@index([categoryId])
+  @@index([platform])
+  @@index([slug])
+  @@index([isActive, isFeatured])
+}
+
+// ─────────────────────────────────────────────
+// SYNONYMS — for search by trade names, aliases
+// ─────────────────────────────────────────────
+model Synonym {
+  id         String   @id @default(cuid())
+  name       String
+  type       SynonymType // TRADE_NAME, IUPAC, COMMON, ABBREVIATION, CAS_RN
+  language   String   @default("en")
+  chemical   Chemical @relation(fields: [chemicalId], references: [id], onDelete: Cascade)
+  chemicalId String
+
+  @@index([name])
+  @@index([chemicalId])
+}
+
+enum SynonymType {
+  TRADE_NAME
+  IUPAC
+  COMMON
+  ABBREVIATION
+  CAS_RN
+  OTHER
+}
+
+// ─────────────────────────────────────────────
+// DOCUMENTS — SDS, MSDS, TDS, COA, Brochure
+// ─────────────────────────────────────────────
+model Document {
+  id          String       @id @default(cuid())
+  chemical    Chemical     @relation(fields: [chemicalId], references: [id], onDelete: Cascade)
+  chemicalId  String
+  type        DocumentType
+  title       String
+  fileName    String
+  fileUrl     String
+  fileSize    Int?
+  version     String?      @default("1.0")
+  language    String       @default("en")
+  isPublic    Boolean      @default(true)
+  downloadCount Int        @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([chemicalId, type])
+}
+
+enum DocumentType {
+  SDS        // Safety Data Sheet
+  MSDS       // Material Safety Data Sheet (legacy)
+  TDS        // Technical Data Sheet
+  COA        // Certificate of Analysis
+  BROCHURE
+  SPECIFICATION
+  REPORT
+  CERTIFICATE
+}
+
+// ─────────────────────────────────────────────
+// CATEGORIES
+// ─────────────────────────────────────────────
+model Category {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  name        String
+  description String?
+  icon        String?
+  platform    Platform  @default(CHEMICALPRO)
+  parentId    String?
+  parent      Category? @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  chemicals   Chemical[]
+  productCount Int      @default(0)
+  seoTitle    String?
+  seoDesc     String?
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([platform, slug])
+}
+
+// ─────────────────────────────────────────────
+// SUPPLIERS
+// ─────────────────────────────────────────────
+model Supplier {
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  companyName     String
+  companyNameLocal String? // in local language
+  type            SupplierType[]
+  platform        Platform @default(CHEMICALPRO)
+
+  // Location
+  country         String
+  countryCode     String
+  state           String?
+  city            String
+  address         String?
+  pinCode         String?
+  geoLat          Float?
+  geoLng          Float?
+
+  // Contact
+  phone           String?
+  whatsapp        String?
+  email           String?
+  website         String?
+
+  // Business
+  yearEstablished Int?
+  employeeCount   String?
+  turnover        String?
+  exportCountries String[]
+  certifications  String[]
+  gstNumber       String?
+
+  // Quality
+  isVerified      Boolean  @default(false)
+  isPremium       Boolean  @default(false)
+  rating          Float    @default(0)
+  reviewCount     Int      @default(0)
+  responseTime    String?
+
+  // SEO
+  seoTitle        String?
+  seoDescription  String?
+
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  products        SupplierProduct[]
+  rfqs            RFQ[]
+
+  @@index([country, platform])
+  @@index([isVerified, isPremium])
+}
+
+enum SupplierType {
+  MANUFACTURER
+  EXPORTER
+  IMPORTER
+  TRADER
+  DISTRIBUTOR
+  WHOLESALER
+  RETAILER
+}
+
+model SupplierProduct {
+  id         String   @id @default(cuid())
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  supplierId String
+  chemical   Chemical @relation(fields: [chemicalId], references: [id])
+  chemicalId String
+  price      String?
+  currency   String?
+  purity     String?
+  packaging  String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@unique([supplierId, chemicalId])
+  @@index([chemicalId])
+}
+
+// ─────────────────────────────────────────────
+// RFQ — Request For Quote
+// ─────────────────────────────────────────────
+model RFQ {
+  id              String    @id @default(cuid())
+  rfqNumber       String    @unique @default(cuid())
+  platform        Platform  @default(CHEMICALPRO)
+
+  // Product
+  chemical        Chemical? @relation(fields: [chemicalId], references: [id])
+  chemicalId      String?
+  productName     String    // free text if not in DB
+  casNumber       String?
+  purity          String?
+
+  // Quantity
+  quantity        Float
+  unit            String
+  frequency       String?   // one-time, monthly, quarterly
+
+  // Request type
+  requestType     RFQType   @default(PRICE_QUOTE)
+
+  // Buyer
+  buyerName       String
+  buyerEmail      String
+  buyerPhone      String
+  buyerCompany    String?
+  buyerCountry    String
+  buyerCity       String?
+  buyerMessage    String?
+
+  // Matching
+  matchedSupplier Supplier? @relation(fields: [supplierId], references: [id])
+  supplierId      String?
+
+  // Status
+  status          RFQStatus @default(PENDING)
+  adminNotes      String?
+  quotedPrice     String?
+
+  // Tracking
+  ipAddress       String?
+  userAgent       String?
+  referrer        String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, platform])
+  @@index([chemicalId])
+  @@index([buyerEmail])
+}
+
+enum RFQType {
+  PRICE_QUOTE
+  SAMPLE_REQUEST
+  SDS_REQUEST
+  TDS_REQUEST
+  COA_REQUEST
+  BULK_SUPPLY
+  OEM_INQUIRY
+}
+
+enum RFQStatus {
+  PENDING
+  PROCESSING
+  QUOTED
+  CLOSED
+  CANCELLED
+}
+
+// ─────────────────────────────────────────────
+// COUNTRY PAGES — for /india/product-name etc
+// ─────────────────────────────────────────────
+model CountryPage {
+  id          String   @id @default(cuid())
+  chemical    Chemical @relation(fields: [chemicalId], references: [id], onDelete: Cascade)
+  chemicalId  String
+  countryCode String
+  countryName String
+  slug        String   @unique // e.g. "india-isopropyl-alcohol"
+  seoTitle    String
+  seoDesc     String
+  content     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([chemicalId, countryCode])
+  @@index([countryCode])
+}
+
+// ─────────────────────────────────────────────
+// INDUSTRY PAGES — /industry/pharma/product-name
+// ─────────────────────────────────────────────
+model IndustryPage {
+  id          String   @id @default(cuid())
+  chemical    Chemical @relation(fields: [chemicalId], references: [id], onDelete: Cascade)
+  chemicalId  String
+  industrySlug String
+  industryName String
+  slug        String   @unique
+  seoTitle    String
+  seoDesc     String
+  content     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([chemicalId, industrySlug])
+}
+
+// ─────────────────────────────────────────────
+// CHEMICAL RELATIONS
+// ─────────────────────────────────────────────
+model ChemicalRelation {
+  id           String   @id @default(cuid())
+  from         Chemical @relation("ChemFrom", fields: [fromId], references: [id])
+  fromId       String
+  to           Chemical @relation("ChemTo", fields: [toId], references: [id])
+  toId         String
+  relationType String   // ALTERNATIVE, PRECURSOR, DERIVATIVE, SUBSTITUTE
+
+  @@unique([fromId, toId])
+}
+
+// ─────────────────────────────────────────────
+// BLOG / ARTICLES
+// ─────────────────────────────────────────────
+model Article {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  platform    Platform @default(CHEMICALPRO)
+  title       String
+  excerpt     String
+  content     String
+  category    String
+  tags        String[]
+  author      String   @default("ChemicalPro Editorial")
+  seoTitle    String
+  seoDesc     String
+  isPublished Boolean  @default(false)
+  publishedAt DateTime?
+  viewCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([platform, isPublished])
+}
+
+// ─────────────────────────────────────────────
+// ADMIN USERS
+// ─────────────────────────────────────────────
+model AdminUser {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String   // hashed
+  role      AdminRole @default(EDITOR)
+  isActive  Boolean  @default(true)
+  lastLogin DateTime?
+  createdAt DateTime @default(now())
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+// ─────────────────────────────────────────────
+// ANALYTICS — page views, searches
+// ─────────────────────────────────────────────
+model SearchLog {
+  id        String   @id @default(cuid())
+  query     String
+  platform  Platform
+  results   Int
+  clicked   String?  // slug of clicked result
+  country   String?
+  createdAt DateTime @default(now())
+
+  @@index([query, platform])
+  @@index([createdAt])
+}
+
+model PageView {
+  id        String   @id @default(cuid())
+  path      String
+  platform  Platform
+  country   String?
+  referer   String?
+  createdAt DateTime @default(now())
+
+  @@index([path, platform])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+enum Platform {
+  CHEMICALPRO
+  PHARMACLOUD
+}
